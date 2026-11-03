@@ -1084,6 +1084,12 @@ body.menue-offen{overflow:hidden}
 .richtung-knopf small{display:block;font-weight:500;font-size:12px;opacity:.85}
 .richtung-knopf.an{background:var(--zvv-blau);color:var(--weiss)}
 .auswahl h3{position:sticky;top:0;background:var(--karte);padding:6px 0 4px;margin:10px 0 2px;color:var(--zvv-blau);font-size:15px;z-index:1}
+.mit-info{display:flex;align-items:center;gap:8px}
+.label.mit-info .info-knopf,.info-knopf{text-transform:none;letter-spacing:0;flex:none}
+.infobox p{margin:0;font-size:var(--text-klein);color:var(--text-dunkel);line-height:1.45}
+.mschwierig{margin-top:18px}
+.mkacheln{margin-top:12px}
+.resultat .infobox{text-align:left}
 </style>
 </head>
 <body>
@@ -1100,7 +1106,8 @@ body.menue-offen{overflow:hidden}
 <div class="buehne">
   <section class="spalte linienspalte">
     <div class="karte">
-      <div class="label">Linie wählen</div>
+      <div class="label mit-info">Linie wählen <button type="button" class="info-knopf" data-akt="info" data-info="spiel" aria-expanded="false" aria-label="Erklärung anzeigen">i</button></div>
+      <div id="spiel-info"></div>
       <div class="raster" id="raster"></div>
       <p class="hinweis" id="raster-hinweis" style="margin-top:10px"></p>
     </div>
@@ -1393,9 +1400,25 @@ async function blEintragen(e) {
   } catch (err) { return "fehler"; }
 }
 
+
+// ---------- Info-Boxen ----------
+let SPIEL_INFO = null;
+const INFO = {
+  gebiet: "Start und Ziel liegen nur in den Quartieren, die du auswählst. Unterwegs darfst du trotzdem durch die ganze Stadt fahren und überall umsteigen.",
+  modus: "<b>Einfach:</b> Die Karte zeigt alle Haltestellen. Du tippst direkt auf der Karte, wo du aussteigst.<br><b>Mittel:</b> Die Karte zeigt nur Start, Ziel und deinen Weg. Die Haltestellen wählst du aus der Liste.<br><b>Schwer:</b> Es gibt keine Karte. Du musst wissen, wo die Haltestellen liegen. Am Schluss erscheint die Karte mit der Lösung.",
+  zeit: "Mit Uhr läuft oben eine Stoppuhr mit. Sie zeigt, wie lange du zum Planen gebraucht hast. Auf das Ergebnis in Minuten hat sie keinen Einfluss.",
+  leaderboard: "Zuerst zählen die Punkte, bei gleich vielen Punkten gewinnt die schnellere Zeit. «Heute» zeigt nur die Spiele von heute, «Alle Tage» die besten von allen Tagen.",
+  competitive: "Pro Runde gibt es höchstens 100 Punkte: 100 × schnellster Weg ÷ dein Weg. Bist du zum Beispiel 25 statt 20 Minuten unterwegs, gibt es 80 Punkte. Aufgeben gibt 0 Punkte.",
+  spiel: "Wähl eine Linie, die an deiner Haltestelle fährt. Dann wählst du, wo du aussteigst. Dort kannst du umsteigen oder ein Stück laufen. Ziel ist, so schnell wie möglich bei B anzukommen.",
+  rechnung: "Jede Fahrt zählt die Fahrzeit plus 3 Minuten Warten beim Einsteigen. Zu Fuss rechnet das Spiel mit etwa 4,5 km/h und kleinen Umwegen. Der Computer sucht mit genau diesen Regeln den schnellsten Weg. Die Fahrzeiten sind geschätzt, nicht aus dem Fahrplan."
+};
+const infoKnopf = (key, wo = "m") => `<button type="button" class="info-knopf" data-${wo === "m" ? "m" : "akt"}="info" data-info="${key}" aria-expanded="${(wo === "m" ? M.info : SPIEL_INFO) === key}" aria-label="Erklärung anzeigen">i</button>`;
+const infoInhalt = key => key === "gruppen" ? infoBox() : `<div class="infobox"><p>${INFO[key]}</p></div>`;
 // ---------- Panels ----------
 function zeichneRaster() {
   const raster = $("raster");
+  $("spiel-info").innerHTML = SPIEL_INFO === "spiel" ? infoInhalt("spiel") : "";
+  const ik = document.querySelector('[data-info="spiel"]'); if (ik) ik.setAttribute("aria-expanded", SPIEL_INFO === "spiel");
   if (S.fertig) { raster.innerHTML = ""; $("raster-hinweis").textContent = CFG.comp ? "Runde fertig." : "Runde fertig. Starte oben eine neue Runde."; return; }
   const linien = linienHier(S.ort);
   raster.innerHTML = linien.map(L => `<button class="kachel${S.linie === L ? " an" : ""}" data-linie="${esc(L)}" aria-pressed="${S.linie === L}" title="Linie ${esc(L)}">${badge(L)}</button>`).join("")
@@ -1461,7 +1484,7 @@ function zeichneErgebnis() {
     const c = CFG.comp, p = c.punkte[c.punkte.length - 1], summe = c.punkte.reduce((a, b) => a + b, 0);
     kopfteil = `<div class="resultat"><div class="label">Runde ${c.punkte.length} von 5${S.aufgegeben ? " · aufgegeben" : ""}</div>
       <div class="gross ${p >= 90 ? "gut" : p >= 70 ? "mittel" : "schlecht"}">${p} Punkte</div>
-      <p class="hinweis">Total ${summe} von ${c.punkte.length * 100} Punkten · Zeit ${uhr((c.endMs || Date.now()) - c.startMs)}</p></div>`;
+      <p class="hinweis">Total ${summe} von ${c.punkte.length * 100} Punkten · Zeit ${uhr((c.endMs || Date.now()) - c.startMs)}</p><div class="mit-info hinweis" style="justify-content:center;margin-top:6px">Wie gibt es Punkte? ${infoKnopf("competitive", "spiel")}</div>${SPIEL_INFO === "competitive" ? infoInhalt("competitive") : ""}</div>`;
     let knopf;
     if (c.punkte.length < 5) knopf = `<button class="knopf voll" data-akt="weiter" style="margin-top:12px;width:100%">Nächste Runde</button>`;
     else if (!c.eingetragen) knopf = `<p class="hinweis" style="margin-top:12px">Ergebnis wird gespeichert …</p>`;
@@ -1472,7 +1495,8 @@ function zeichneErgebnis() {
     return;
   }
   if (S.aufgegeben) {
-    box.innerHTML = `<div class="resultat"><div class="label">Aufgegeben</div><p class="hinweis">Kein Problem. Die gestrichelte Linie zeigt den schnellsten Weg (etwa ${best} min).</p></div>` + vergleich(false);
+    box.innerHTML = `<div class="resultat"><div class="label">Aufgegeben</div><p class="hinweis">Kein Problem. Die gestrichelte Linie zeigt den schnellsten Weg (etwa ${best} min).</p></div>` + vergleich(false)
+      + `<div class="mit-info hinweis" style="margin-top:12px">Wie wird gerechnet? ${infoKnopf("rechnung", "spiel")}</div>${SPIEL_INFO === "rechnung" ? infoInhalt("rechnung") : ""}`;
     return;
   }
   const sterne = diff <= 0 ? 3 : diff <= 3 ? 2 : diff <= 8 ? 1 : 0;
@@ -1486,7 +1510,7 @@ function zeichneErgebnis() {
     <div class="gross ${kl}">${diff > 0 ? "+" + diff : diff} min</div><p class="hinweis">${satz}${CFG.aufZeit ? ` Gebraucht: ${uhr(S.endMs - S.startMs)}.` : ""}</p></div>`
     + vergleich(true)
     + `<button class="knopf voll" data-akt="neu" style="margin-top:12px;width:100%">Neue Runde</button>
-    <p class="hinweis" style="margin-top:10px">Gerechnet wird mit ${WARTEN} min Warten bei jedem Einsteigen und etwa 4,5 km/h zu Fuss.</p>`;
+    <div class="mit-info hinweis" style="margin-top:12px">Wie wird gerechnet? ${infoKnopf("rechnung", "spiel")}</div>${SPIEL_INFO === "rechnung" ? infoInhalt("rechnung") : ""}`;
 }
 function zeichneZaehler() {
   const z = $("zaehler"), st = $("status");
@@ -1726,6 +1750,7 @@ document.addEventListener("click", e => {
   else if (akt === "board") menueOeffnen("comp", "board");
   else if (akt === "menue") menueOeffnen(CFG.comp ? "comp" : "normal");
   else if (akt === "neu") neueRunde();
+  else if (akt === "info") { SPIEL_INFO = SPIEL_INFO === t.dataset.info ? null : t.dataset.info; zeichneAlles(); }
 });
 $("neu").onclick = () => neueRunde();
 $("menue-knopf").onclick = () => menueOeffnen(CFG.comp ? "comp" : "normal");
@@ -1789,8 +1814,10 @@ function zeichneMenue() {
     <button role="tab" class="mtab${M.tab === "comp" ? " an" : ""}" aria-selected="${M.tab === "comp"}" data-m="tab" data-tab="comp">Competitive</button></div>`;
   let h = "";
   if (M.tab === "normal" && M.ansicht === "start") {
-    h = `<div class="mkopf"><div class="mlabel">Gebiet für Start und Ziel</div>
+    h = `<div class="mkopf"><div class="mlabel mit-info">Gebiet für Start und Ziel ${infoKnopf("gebiet")}</div>
+        ${M.info === "gebiet" ? infoInhalt("gebiet") : ""}
         <button class="mwert" data-m="gebiet-nur">${gebietText(w.gebiet)} <span class="mstift">${ICON.stift}</span></button></div>
+      <div class="mlabel mit-info mschwierig">Schwierigkeit ${infoKnopf("modus")}</div>${M.info === "modus" ? infoInhalt("modus") : ""}
       <div class="mkacheln">
         <button class="mkachel" data-m="modus" data-karte="einfach"><b>Einfach</b><small>Karte mit allen Haltestellen</small></button>
         <button class="mkachel" data-m="modus" data-karte="mittel"><b>Mittel</b><small>Karte nur mit deinem Weg</small></button>
@@ -1803,10 +1830,10 @@ function zeichneMenue() {
       ${gebietWaehler()}<button class="mknopf" data-m="${nurGebiet ? "start" : "los"}">${nurGebiet ? "Übernehmen" : "Spielen"}</button></div>`;
   } else if (M.tab === "normal" && M.ansicht === "eigen") {
     h = `<div class="minhalt">${zurueckZeile}<h2>Benutzerdefiniert</h2>
-      <div class="einstellung"><div class="mlabel">Karte</div>${segment("karte", "karte", [["einfach", "Einfach"], ["mittel", "Mittel"], ["schwer", "Schwer"]], v => w.karte === v)}</div>
-      <div class="einstellung"><div class="mlabel mit-info">Verkehrsmittel <button type="button" class="info-knopf" data-m="info" aria-expanded="${!!M.info}" aria-label="Was gehört in welche Gruppe?">i</button></div>${M.info ? infoBox() : ""}${segment("gruppe", "g", [[1, GRUPPEN_NAME[1]], [2, GRUPPEN_NAME[2]], [3, GRUPPEN_NAME[3]]], v => w.gruppen.includes(+v)).replace('class="segment"', 'class="segment stapel"')}</div>
-      <div class="einstellung"><div class="mlabel">Auf Zeit</div>${segment("zeit", "zeit", [[0, "Ohne Uhr"], [1, "Mit Uhr"]], v => w.aufZeit === (v === 1))}</div>
-      <div class="einstellung"><div class="mlabel">Kreise und Quartiere</div>${gebietWaehler()}</div>
+      <div class="einstellung"><div class="mlabel mit-info">Karte ${infoKnopf("modus")}</div>${M.info === "modus" ? infoInhalt("modus") : ""}${segment("karte", "karte", [["einfach", "Einfach"], ["mittel", "Mittel"], ["schwer", "Schwer"]], v => w.karte === v)}</div>
+      <div class="einstellung"><div class="mlabel mit-info">Verkehrsmittel ${infoKnopf("gruppen")}</div>${M.info === "gruppen" ? infoInhalt("gruppen") : ""}${segment("gruppe", "g", [[1, GRUPPEN_NAME[1]], [2, GRUPPEN_NAME[2]], [3, GRUPPEN_NAME[3]]], v => w.gruppen.includes(+v)).replace('class="segment"', 'class="segment stapel"')}</div>
+      <div class="einstellung"><div class="mlabel mit-info">Auf Zeit ${infoKnopf("zeit")}</div>${M.info === "zeit" ? infoInhalt("zeit") : ""}${segment("zeit", "zeit", [[0, "Ohne Uhr"], [1, "Mit Uhr"]], v => w.aufZeit === (v === 1))}</div>
+      <div class="einstellung"><div class="mlabel mit-info">Kreise und Quartiere ${infoKnopf("gebiet")}</div>${M.info === "gebiet" ? infoInhalt("gebiet") : ""}${gebietWaehler()}</div>
       <button class="mknopf" data-m="los">Spielen</button></div>`;
   } else if (M.tab === "comp" && M.ansicht === "start") {
     h = `<div class="mkacheln zwei oben">
@@ -1829,7 +1856,7 @@ function zeichneMenue() {
         <p class="hinweis">${online() ? "Alle können diesen Namen sehen. Nimm lieber einen Spitznamen als deinen vollen Namen." : "Der Name wird auf diesem Gerät gespeichert."}</p>
         <button class="mknopf" type="submit">Los geht's</button></form></div>`;
   } else if (M.tab === "comp" && M.ansicht === "board") {
-    h = `<div class="minhalt">${zurueckZeile}<h2>Leaderboard</h2>
+    h = `<div class="minhalt">${zurueckZeile}<h2 class="mit-info">Leaderboard ${infoKnopf("leaderboard")}</h2>${M.info === "leaderboard" ? infoInhalt("leaderboard") : ""}
       ${segment("boardtag", "tag", [["heute", "Heute"], ["alle", "Alle Tage"]], v => M.boardTag === v)}`;
     const b = M.board;
     if (!b) h += `<p class="hinweis" style="margin-top:12px">Wird geladen …</p>`;
@@ -1876,7 +1903,7 @@ $("menue").addEventListener("click", e => {
     wahlSpeichern(); menueZu(); neueRunde(); return;
   }
   else if (a === "regeln") M.ansicht = "regeln";
-  else if (a === "info") M.info = !M.info;
+  else if (a === "info") M.info = M.info === t.dataset.info ? null : t.dataset.info;
   else if (a === "comp-name") M.ansicht = "name";
   else if (a === "board") { M.ansicht = "board"; ladeBoard(); return; }
   else if (a === "boardtag") { M.boardTag = t.dataset.tag; ladeBoard(); return; }

@@ -959,6 +959,8 @@ body{touch-action:manipulation}
 .bestenliste td{padding:var(--abstand-2) 6px;border-bottom:1px solid var(--linie);color:var(--stark)}
 .bestenliste tr:first-child td{font-weight:700}
 .bestenliste tr.ich td{background:var(--blau-hell)}
+.bonus{display:inline-block;background:var(--gruen);color:#fff;font-weight:600;font-size:var(--text-klein);line-height:1;padding:3px 6px;border-radius:var(--radius-klein,4px);vertical-align:middle;margin-left:4px}
+.bonus-text{color:var(--gruen);font-weight:600;margin:4px 0}
 .segment.klein button{font-size:15px}
 .schluss{margin-top:var(--abstand-3);padding:var(--abstand-3);background:var(--blau-hell);border-radius:var(--rund);text-align:center}
 .meldung{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--stark);color:var(--karte);padding:var(--abstand-2) var(--abstand-4);border-radius:var(--rund);z-index:3000;font-size:var(--text-klein);max-width:calc(100% - 32px)}
@@ -1341,11 +1343,14 @@ function zurueck() {
   zeichneAlles();
 }
 const meineMin = () => S.legs.reduce((s, l) => s + legMin(l), 0);
-const rundenPunkte = () => S.aufgegeben ? 0 : Math.min(100, Math.round(100 * S.beste.min / Math.max(meineMin(), 0.1)));
+// Gleich schnell (auch auf anderem Weg) = 100. Schneller als der Computer = 100 + 100 Bonus.
+const schnellerAlsComputer = () => !S.aufgegeben && meineMin() < S.beste.min - 0.01;
+const rundenPunkte = () => S.aufgegeben ? 0 : schnellerAlsComputer() ? 200 : Math.min(100, Math.round(100 * S.beste.min / Math.max(meineMin(), 0.1)));
 function beenden(aufgegeben) {
   S.fertig = true; S.aufgegeben = !!aufgegeben; S.modus = null; S.linie = null; S.gruppen = []; S.endMs = Date.now();
   if (CFG.comp) {
     CFG.comp.punkte.push(rundenPunkte());
+    if (schnellerAlsComputer()) CFG.comp.boni = (CFG.comp.boni || 0) + 1;
     if (CFG.comp.punkte.length === 5) { CFG.comp.endMs = Date.now(); compAbschliessen(); }
   } else if (!aufgegeben) {
     const st = lesen("tramrennen-netz", {}), diff = Math.round(meineMin() - S.beste.min);
@@ -1358,7 +1363,7 @@ const COMP_GRUPPEN = [[1], [1], [1, 2], [1, 3], [1, 2, 3]];
 function compStarten(name) {
   const tag = heute();
   CFG = { karte: "mittel", gruppen: COMP_GRUPPEN[0], gebiet: new Set(ALLE_QUARTIERE), aufZeit: true,
-          comp: { name, tag, index: 0, punkte: [], startMs: Date.now(), endMs: null, eingetragen: false } };
+          comp: { name, tag, index: 0, punkte: [], boni: 0, startMs: Date.now(), endMs: null, eingetragen: false } };
   compRunde();
 }
 function compRunde() {
@@ -1370,7 +1375,7 @@ function compRunde() {
 function compWeiter() { CFG.comp.index++; compRunde(); }
 async function compAbschliessen() {
   const c = CFG.comp;
-  const eintrag = { name: c.name, punkte: c.punkte.reduce((a, b) => a + b, 0), zeit_s: Math.round((c.endMs - c.startMs) / 1000), tag: c.tag };
+  const eintrag = { name: c.name, punkte: c.punkte.reduce((a, b) => a + b, 0), zeit_s: Math.round((c.endMs - c.startMs) / 1000), tag: c.tag, bonus: (c.boni || 0) * 100 };
   c.ergebnis = eintrag;
   c.status = await blEintragen(eintrag);
   c.eingetragen = true;
@@ -1387,9 +1392,11 @@ async function blLaden(tag) {
   if (online()) {
     try {
       const filter = tag ? `&tag=eq.${encodeURIComponent(tag)}` : "";
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/bestenliste?select=name,punkte,zeit_s,tag${filter}&order=punkte.desc,zeit_s.asc&limit=50`,
-        { headers: kopf() });
-      if (r.ok) return { liste: await r.json(), online: true };
+      for (const felder of ["name,punkte,zeit_s,tag,bonus", "name,punkte,zeit_s,tag"]) {
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/bestenliste?select=${felder}${filter}&order=punkte.desc,zeit_s.asc&limit=50`,
+          { headers: kopf() });
+        if (r.ok) return { liste: await r.json(), online: true };
+      }
     } catch (e) {}
   }
   const lokal = lesen("tramrennen-bestenliste", []);
@@ -1399,9 +1406,11 @@ async function blEintragen(e) {
   const lokal = lesen("tramrennen-bestenliste", []); lokal.push(e); schreiben("tramrennen-bestenliste", lokal.slice(-200));
   if (!online()) return "lokal";
   try {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/bestenliste`, { method: "POST",
+    const senden = daten => fetch(`${SUPABASE_URL}/rest/v1/bestenliste`, { method: "POST",
       headers: kopf({ "Content-Type": "application/json", Prefer: "return=minimal" }),
-      body: JSON.stringify(e) });
+      body: JSON.stringify(daten) });
+    let r = await senden(e);
+    if (!r.ok && !e.bonus) { const { bonus, ...ohne } = e; r = await senden(ohne); } // Tabelle noch ohne Bonus-Spalte
     return r.ok ? "online" : "fehler";
   } catch (err) { return "fehler"; }
 }
@@ -1414,7 +1423,7 @@ const INFO = {
   modus: "<b>Einfach:</b> Die Karte zeigt alle Haltestellen. Du tippst direkt auf der Karte, wo du aussteigst.<br><b>Mittel:</b> Die Karte zeigt nur Start, Ziel und deinen Weg. Die Haltestellen wählst du aus der Liste.<br><b>Schwer:</b> Es gibt keine Karte. Du musst wissen, wo die Haltestellen liegen. Am Schluss erscheint die Karte mit der Lösung.",
   zeit: "Mit Uhr läuft oben eine Stoppuhr mit. Sie zeigt, wie lange du zum Planen gebraucht hast. Auf das Ergebnis in Minuten hat sie keinen Einfluss.",
   leaderboard: "Zuerst zählen die Punkte, bei gleich vielen Punkten gewinnt die schnellere Zeit. «Heute» zeigt nur die Spiele von heute, «Alle Tage» die besten von allen Tagen.",
-  competitive: "Pro Runde gibt es höchstens 100 Punkte: 100 × schnellster Weg ÷ dein Weg. Bist du zum Beispiel 25 statt 20 Minuten unterwegs, gibt es 80 Punkte. Aufgeben gibt 0 Punkte.",
+  competitive: "Pro Runde gibt es 100 Punkte, wenn du gleich schnell bist wie der schnellste Weg, auch auf einem anderen Weg. Bist du langsamer, gibt es weniger: 100 × schnellster Weg ÷ dein Weg. Mit 25 statt 20 Minuten gibt es zum Beispiel 80 Punkte. Schaffst du es, schneller zu sein als der Computer, gibt es 100 Bonuspunkte dazu, also 200. Im Leaderboard steht dann ein grünes «+100». Aufgeben gibt 0 Punkte.",
   spiel: "Wähl eine Linie, die an deiner Haltestelle fährt. Dann wählst du, wo du aussteigst. Dort kannst du umsteigen oder ein Stück laufen. Ziel ist, so schnell wie möglich bei B anzukommen.",
   rechnung: "Jede Fahrt zählt die echte Fahrzeit plus 3 Minuten Warten beim Einsteigen. Zu Fuss rechnet das Spiel mit etwa 4,5 km/h und kleinen Umwegen. Der Computer sucht mit genau diesen Regeln den schnellsten Weg. Die Fahrzeiten zwischen den Haltestellen stammen aus dem echten Fahrplan an einem Werktag um 10 Uhr. Nur die 3 Minuten Warten sind geschätzt."
 };
@@ -1490,11 +1499,12 @@ function zeichneErgebnis() {
     const c = CFG.comp, p = c.punkte[c.punkte.length - 1], summe = c.punkte.reduce((a, b) => a + b, 0);
     kopfteil = `<div class="resultat"><div class="label">Runde ${c.punkte.length} von 5${S.aufgegeben ? " · aufgegeben" : ""}</div>
       <div class="gross ${p >= 90 ? "gut" : p >= 70 ? "mittel" : "schlecht"}">${p} Punkte</div>
-      <p class="hinweis">Total ${summe} von ${c.punkte.length * 100} Punkten · Zeit ${uhr((c.endMs || Date.now()) - c.startMs)}</p><div class="mit-info hinweis" style="justify-content:center;margin-top:6px">Wie gibt es Punkte? ${infoKnopf("competitive", "spiel")}</div>${SPIEL_INFO === "competitive" ? infoInhalt("competitive") : ""}</div>`;
+      ${p > 100 ? `<p class="bonus-text">Schneller als der Computer! 100 Punkte und <span class="bonus">+100</span> Bonus</p>` : ""}
+      <p class="hinweis">Total ${summe} Punkte · Zeit ${uhr((c.endMs || Date.now()) - c.startMs)}</p><div class="mit-info hinweis" style="justify-content:center;margin-top:6px">Wie gibt es Punkte? ${infoKnopf("competitive", "spiel")}</div>${SPIEL_INFO === "competitive" ? infoInhalt("competitive") : ""}</div>`;
     let knopf;
     if (c.punkte.length < 5) knopf = `<button class="knopf voll" data-akt="weiter" style="margin-top:12px;width:100%">Nächste Runde</button>`;
     else if (!c.eingetragen) knopf = `<p class="hinweis" style="margin-top:12px">Ergebnis wird gespeichert …</p>`;
-    else knopf = `<div class="schluss"><div class="label">Fertig, ${esc(c.name)}!</div><div class="gross">${c.ergebnis.punkte} / 500</div>
+    else knopf = `<div class="schluss"><div class="label">Fertig, ${esc(c.name)}!</div><div class="gross">${c.ergebnis.punkte} Punkte</div>${c.ergebnis.bonus ? `<p class="bonus-text">davon <span class="bonus">+${c.ergebnis.bonus}</span> Bonus</p>` : ""}
         <p class="hinweis">Zeit ${uhr(c.ergebnis.zeit_s * 1000)} · ${c.status === "online" ? "Im Leaderboard eingetragen." : c.status === "fehler" ? "Online-Leaderboard nicht erreichbar, nur auf diesem Gerät gespeichert." : "Auf diesem Gerät gespeichert."}</p>
         <div class="knopfreihe" style="margin-top:10px"><button class="knopf voll" data-akt="board">Leaderboard</button><button class="knopf" data-akt="menue">Menü</button></div></div>`;
     box.innerHTML = kopfteil + knopf + vergleich(!S.aufgegeben);
@@ -1843,12 +1853,13 @@ function zeichneMenue() {
       <button class="mknopf" data-m="los">Spielen</button></div>`;
   } else if (M.tab === "comp" && M.ansicht === "start") {
     h = `<div class="mkacheln zwei oben">
-        <button class="mkachel" data-m="comp-name"><b>Spielen</b><small>5 Runden · max. 500 Punkte</small></button>
+        <button class="mkachel" data-m="comp-name"><b>Spielen</b><small>5 Runden · 100 Punkte pro Runde</small></button>
         <button class="mkachel" data-m="board"><b>Leaderboard</b><small>Die Besten</small></button></div>
       <div class="mzeilen">${zeile("regeln", "regeln", "So funktioniert's")}${CFG.comp && S && !(CFG.comp.punkte.length === 5) ? zeile("weiter-spielen", "verlauf", "Weiterspielen") : ""}</div>`;
   } else if (M.tab === "comp" && M.ansicht === "regeln") {
     h = `<div class="minhalt">${zurueckZeile}<h2>So funktioniert's</h2><ul class="regeln">
-        <li>5 Runden, pro Runde höchstens 100 Punkte, total 500.</li>
+        <li>5 Runden, pro Runde 100 Punkte für den schnellsten Weg, auch auf einem anderen Weg.</li>
+        <li>Schneller als der Computer? Dann gibt es +100 Bonuspunkte, und im Leaderboard steht ein grünes «+».</li>
         <li>Ganz Zürich, alle Kreise und Quartiere. Der schnellste Weg hat immer 2 Umstiege.</li>
         <li>Runde 1 und 2: nur Tram und Hauptbuslinien. Runde 3: plus Quartierbusse. Runde 4: plus zu Fuss. Runde 5: alles.</li>
         <li>Punkte: 100 × schnellster Weg ÷ dein Weg. Aufgeben gibt 0 Punkte.</li>
@@ -1869,7 +1880,7 @@ function zeichneMenue() {
     else {
       h += `<p class="hinweis" style="margin:10px 0">${b.online ? "Alle Spielerinnen und Spieler." : "Nur die Runden auf diesem Gerät. Das Online-Leaderboard ist hier nicht erreichbar."}</p>`;
       h += b.liste.length ? `<div class="tabelle-wrap"><table class="bestenliste"><thead><tr><th>#</th><th>Name</th><th>Punkte</th><th>Zeit</th>${M.boardTag === "alle" ? "<th>Tag</th>" : ""}</tr></thead><tbody>`
-        + b.liste.map((e, i) => `<tr${CFG.comp && CFG.comp.ergebnis && e.name === CFG.comp.ergebnis.name && e.punkte === CFG.comp.ergebnis.punkte && e.zeit_s === CFG.comp.ergebnis.zeit_s ? ' class="ich"' : ""}><td>${i + 1}</td><td>${esc(e.name)}</td><td>${e.punkte}</td><td>${uhr(e.zeit_s * 1000)}</td>${M.boardTag === "alle" ? `<td>${esc(String(e.tag).split("-").reverse().join("."))}</td>` : ""}</tr>`).join("")
+        + b.liste.map((e, i) => `<tr${CFG.comp && CFG.comp.ergebnis && e.name === CFG.comp.ergebnis.name && e.punkte === CFG.comp.ergebnis.punkte && e.zeit_s === CFG.comp.ergebnis.zeit_s ? ' class="ich"' : ""}><td>${i + 1}</td><td>${esc(e.name)}</td><td>${e.punkte}${e.bonus ? ` <span class="bonus">+${e.bonus}</span>` : ""}</td><td>${uhr(e.zeit_s * 1000)}</td>${M.boardTag === "alle" ? `<td>${esc(String(e.tag).split("-").reverse().join("."))}</td>` : ""}</tr>`).join("")
         + `</tbody></table></div>` : `<p class="hinweis">Noch niemand hat gespielt. Sei die oder der Erste!</p>`;
     }
     h += `<button class="mknopf" data-m="comp-name" style="margin-top:16px">Spielen</button></div>`;
